@@ -39,6 +39,12 @@
   .askval{font-size:22px; font-weight:800; font-variant-numeric:tabular-nums; color:var(--accent)}
   select,input[type=time]{background:var(--card2); color:var(--txt); border:1px solid var(--line); border-radius:12px; padding:10px 12px; font-size:16px; font-family:inherit}
   #pickDrink{min-width:170px; max-width:66%}
+  .askcol{display:flex; flex-direction:column; gap:11px; padding:15px 2px; border-top:1px solid var(--line)}
+  .beds{display:flex; flex-wrap:wrap; gap:8px}
+  .bedchip{background:var(--card2); border:1px solid var(--line); color:var(--txt); border-radius:999px;
+    padding:10px 15px; font-size:15.5px; font-family:inherit; font-variant-numeric:tabular-nums; cursor:pointer}
+  .bedchip:active{transform:scale(.94)}
+  .bedchip.sel{background:linear-gradient(135deg,#8b9cff,#7be0c0); color:#0e1030; border-color:transparent; font-weight:800}
   .askbtn{width:100%; margin-top:16px; padding:15px; border:none; border-radius:14px; cursor:pointer;
     font-family:inherit; font-size:16px; font-weight:800; color:#0e1030;
     background:linear-gradient(135deg,#8b9cff,#7be0c0); box-shadow:0 4px 16px rgba(139,156,255,.35)}
@@ -68,8 +74,10 @@
         <div class="askrow"><span class="asklabel">🕐 今の時刻</span><span class="askval" id="nowBig">--:--</span></div>
         <div class="askrow"><label class="asklabel" for="pickDrink">🥤 飲みたいもの</label>
           <select id="pickDrink"><option value="">選んでね</option></select></div>
-        <div class="askrow"><label class="asklabel" for="pickBed">🌙 寝たい時刻</label>
-          <input type="time" id="pickBed"></div>
+        <div class="askcol">
+          <span class="asklabel">🌙 寝たい時刻（タップで選択）</span>
+          <div class="beds" id="bedChips"></div>
+        </div>
       </div>
       <button class="askbtn" id="askBtn">どのくらい飲める？ 教えて 🔍</button>
     </div>
@@ -112,16 +120,20 @@ const DRINKS=[
 /* ===== 前提（カフェインに敏感な体質に合わせて慎重め） ===== */
 const HALF=6.5;     // カフェイン半減期(時間)：敏感なので長め（＝体に長く残る前提）
 const LINE=40;      // おやすみライン：敏感なので低め＝就寝時にこれ以下を目安(mg)
+const BEDS=["21:30","22:00","22:30","23:00","23:30","00:00","00:30","01:00"]; // 寝たい時刻の候補（深夜は24:00〜表示）
 
 /* ===== 状態（就寝時刻だけ保存） ===== */
 let state={bedtime:"23:00"};
 try{ const s=JSON.parse(localStorage.getItem('caffeine_bed')||'null'); if(s&&s.bedtime) state.bedtime=s.bedtime; }catch(e){}
+if(!BEDS.includes(state.bedtime)) state.bedtime="23:00"; // 候補外なら既定値に
 function saveBed(){ localStorage.setItem('caffeine_bed', JSON.stringify(state)); }
 let revealed=false; // 「教えて」を押すまで結果は隠す
 
 /* ===== 時間ヘルパー ===== */
 function hhmmToMin(s){const p=String(s).split(':');return (+p[0])*60+(+p[1]||0);}
 function minToHHMM(m){m=((Math.round(m)%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+function fmtBed(b){const h=Math.floor(b/60),m=b%60;return h+':'+String(m).padStart(2,'0');} // 深夜は24:00〜表示
+function bedLabel(t){let m=hhmmToMin(t); if(m<360)m+=1440; return fmtBed(m);}
 function bedMin(){let b=hhmmToMin(state.bedtime); if(b<360)b+=1440; return b;} // 午前6時前は翌日扱い
 function nowMin(){const d=new Date();return d.getHours()*60+d.getMinutes();}
 function dur(min){min=Math.max(0,Math.round(min));const h=Math.floor(min/60),m=min%60;return (h>0?h+'時間':'')+(m>0?m+'分':(h>0?'':'0分'));}
@@ -140,10 +152,20 @@ function buildPicker(){
   document.getElementById('pickDrink').innerHTML='<option value="">選んでね</option>'+
     DRINKS.map((d,i)=>'<option value="'+i+'">'+d.emoji+' '+d.name+'（'+d.serv+d.u+'で'+Math.round(d.per*d.serv)+'mg）</option>').join('');
 }
+function buildBeds(){
+  const c=document.getElementById('bedChips');
+  c.innerHTML=BEDS.map(t=>'<button class="bedchip" data-t="'+t+'">'+bedLabel(t)+'</button>').join('');
+  c.querySelectorAll('.bedchip').forEach(b=>b.onclick=()=>{
+    state.bedtime=b.dataset.t; saveBed(); revealed=false; highlightBeds(); render();
+  });
+}
+function highlightBeds(){
+  document.querySelectorAll('#bedChips .bedchip').forEach(b=>b.classList.toggle('sel', b.dataset.t===state.bedtime));
+}
 function render(){
   const now=nowMin(), b=bedMin();
   document.getElementById('nowBig').textContent=minToHHMM(now);
-  document.getElementById('pickBed').value=state.bedtime;
+  highlightBeds();
   const rc=document.getElementById('resultCard');
   const v=document.getElementById('pickDrink').value;
 
@@ -173,7 +195,7 @@ function render(){
       ? '💡 今飲むなら '+alt.emoji+alt.name+'（約'+fmtAmt(md/alt.per)+alt.u+'）くらいまでがおすすめ'
       : '💡 今日はもうカフェインなしで寝よう 🌙';
     rc.innerHTML='<div class="rface">😵</div><div class="rbig" style="color:var(--bad)">今は控えめに</div>'+
-      '<div class="rsub">'+d.emoji+d.name+'を今飲むと'+minToHHMM(b)+'の就寝に響きそう</div>'+
+      '<div class="rsub">'+d.emoji+d.name+'を今飲むと'+fmtBed(b)+'の就寝に響きそう</div>'+
       '<div class="rsugg">'+sugg+'</div>';
     return;
   }
@@ -183,13 +205,12 @@ function render(){
   rc.innerHTML='<div class="rface">😴</div>'+
     '<div class="rbig" style="color:var(--ok)">あと 約'+maxAmt+d.u+' まで</div>'+
     '<div class="rsub">'+d.emoji+d.name+' で '+fmtServ(servings)+d.counter+'ぶん（1'+d.counter+'='+d.serv+d.u+'）</div>'+
-    '<div class="rdetail">この量なら、'+minToHHMM(b)+'に寝るときのカフェインは<br>おやすみライン（約'+LINE+'mg）以下に収まるよ 👍<br>'+
+    '<div class="rdetail">この量なら、'+fmtBed(b)+'に寝るときのカフェインは<br>おやすみライン（約'+LINE+'mg）以下に収まるよ 👍<br>'+
     '<span style="opacity:.7">就寝まであと'+dur(b-now)+'</span></div>';
 }
 
 /* ===== 操作 ===== */
 document.getElementById('pickDrink').onchange=()=>{revealed=false;render();};
-document.getElementById('pickBed').onchange=e=>{state.bedtime=e.target.value;saveBed();revealed=false;render();};
 document.getElementById('askBtn').onclick=()=>{
   if(document.getElementById('pickDrink').value===''){
     revealed=false;
@@ -201,7 +222,7 @@ document.getElementById('askBtn').onclick=()=>{
 
 /* ===== 初期化 ===== */
 buildPicker();
-document.getElementById('pickBed').value=state.bedtime;
+buildBeds();
 render();
 setInterval(()=>{ document.getElementById('nowBig').textContent=minToHHMM(nowMin()); if(revealed) render(); }, 30000);
 </script>
